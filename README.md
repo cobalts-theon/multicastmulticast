@@ -34,7 +34,7 @@ Chỉ cần biên dịch lại khi sửa `Net.java`. Những lần sau chạy `j
 java -cp build Net listen lop1
 ```
 
-Chương trình tự nghe và hiển thị tin đến, không cần gõ lệnh nhận. Giữ cửa sổ mở; mỗi máy có thể nhập lệnh gửi ngay trong cửa sổ đó.
+Chương trình tự nghe và lưu tin đến. Nhấn Enter để xem tin; nội dung đang gõ không bị tin đến chen vào. Giữ cửa sổ mở; mỗi máy có thể nhập lệnh gửi ngay trong cửa sổ đó.
 
 Sau khi chương trình mở, nhập tại dấu `>` rồi nhấn Enter:
 
@@ -60,7 +60,7 @@ Thay IP ví dụ bằng IP thật: xem bằng `ipconfig` trên Windows hoặc `i
 
 Ví dụ A và B chạy `listen lop1`, C chạy `listen lop2`: A gửi tới IP của B thì chỉ B nhận; gửi tới `lop1` thì A và B nhận; gửi tới `*` thì cả ba nhận.
 
-Máy nhận hiển thị: `[Tu 192.168.1.10 | lop1] Xin chao nhom`. Có thể trả lời ngay trong cùng cửa sổ.
+Máy nhận hiển thị: `[Tu 192.168.1.10 | lop1] Xin chao nhom`. Nhấn Enter để xem tin, rồi trả lời trong cùng cửa sổ.
 
 ## Listen vừa nghe vừa gửi
 
@@ -93,8 +93,10 @@ Cũng có thể chạy trực tiếp `java Net.java` nếu dùng JDK 11 trở l�
 ## Ghi nhớ
 
 - Máy khác cũng phải có mã nguồn, biên dịch và chạy chương trình mới nhận được tin.
-- Nếu không nhận: kiểm tra cùng LAN, đúng IP/nhóm và firewall cho phép UDP cổng **50000**. Wi-Fi có thể chặn multicast hoặc cô lập các máy.
+- Nếu không nhận: kiểm tra cùng LAN, đúng IP/nhóm và firewall cho phép UDP cổng **50000 và 50001**. Wi-Fi có thể chặn multicast hoặc cô lập các máy.
 - Nếu không tìm thấy `java`/`javac`, kiểm tra cài đặt JDK và PATH.
 - `Da gui` chỉ xác nhận thao tác gửi, chưa xác nhận máy đích nhận được.
 - `Scanner` đọc lệnh liên tục; luồng riêng chờ nhận tin. IP dùng unicast, nhóm và `*` dùng multicast.
 - File biên dịch nằm trong `build/`, được bỏ qua bởi `.gitignore`.
+
+Gửi riêng dùng IP được in khi mở chương trình (IP Wi-Fi/Ethernet của máy nhận). UDP 50000 nhận tin riêng; UDP 50001 nhận nhóm và `*`. Sau khi cập nhật, tất cả máy cần chạy bản mới vì cổng multicast đã đổi. Mỗi máy chỉ mở một chương trình nhận.
