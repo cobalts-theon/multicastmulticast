@@ -115,7 +115,7 @@ public class Net {
             receiver.start();
             System.out.println("Nhap: net send {IP | group | *} message");
             System.out.println("Nhom: net listen group1, group2,... | net outgroup group1, group2,...");
-            System.out.println("Vi du: net send lop1 Xin chao. Go exit de thoat.");
+            System.out.println("Vi du: net send group1 Xin chao. Go exit de thoat.");
             while (true) {
                 System.out.print("> ");
                 if (!scanner.hasNextLine()) break;
