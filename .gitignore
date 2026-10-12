@@ -1,0 +1,3 @@
+# Khong dua file da bien dich len Git.
+/build/
+*.class
