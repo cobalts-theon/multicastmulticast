@@ -1,6 +1,7 @@
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 // Bai tap net send: UDP cho mot may, multicast cho nhom va toan mang LAN.
 public class Net {
@@ -9,16 +10,13 @@ public class Net {
 
     public static void main(String[] args) {
         try {
-            if (args.length >= 1 && args[0].equalsIgnoreCase("listen")) {
-                listen(Arrays.copyOfRange(args, 1, args.length));
+            if (args.length == 0 || args[0].equalsIgnoreCase("listen")) {
+                listen(args.length == 0 ? new String[0] : Arrays.copyOfRange(args, 1, args.length));
             } else if (args.length >= 3 && args[0].equalsIgnoreCase("send")) {
-                String message = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
-                send(args[1], message);
+                send(args[1], String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
             } else {
-                System.out.println("Cach dung:");
-                System.out.println("  net listen [group1 group2 ...]");
-                System.out.println("  net send {IP | group | *} message");
-                System.out.println("Vi du: net send lop1 Xin chao cac ban");
+                System.out.println("java -cp build Net listen [nhom ...]");
+                System.out.println("java -cp build Net send {IP | group | *} message");
             }
         } catch (Exception e) {
             System.err.println("Loi: " + e.getMessage());
@@ -67,21 +65,16 @@ public class Net {
 
     static void send(String target, String message) throws Exception {
         boolean multicast = !isIp(target);
-        String address;
-        String label;
-        if (target.equals("*")) {
-            address = ALL;
-            label = "*";
-        } else if (!multicast) {
+        String address = target;
+        String label = "IP";
+        if (multicast) {
+            if (!target.equals("*")) checkGroup(target);
+            address = target.equals("*") ? ALL : groupAddress(target);
+            label = target;
+        } else {
             for (String part : target.split("\\.")) {
                 if (Integer.parseInt(part) > 255) throw new Exception("IPv4 khong hop le.");
             }
-            address = target;
-            label = "IP";
-        } else {
-            checkGroup(target);
-            address = groupAddress(target);
-            label = target;
         }
         // Goi tin gom nhan dich + xuong dong + noi dung UTF-8.
         byte[] data = (label + "\n" + message).getBytes(StandardCharsets.UTF_8);
@@ -96,40 +89,111 @@ public class Net {
         System.out.println("Da gui den " + target + ": " + message);
     }
 
+    // Scanner doc lenh lien tuc; luong rieng nhan tin trong luc cho nguoi dung go.
     static void listen(String[] groups) throws Exception {
-        Set<String> joined = new HashSet<>();
-        for (String group : groups) {
-            checkGroup(group);
-            joined.add(group);
-        }
+        // Hai luong cung dung danh sach nhom: nhap lenh them, nhan tin doc.
+        Set<String> joined = ConcurrentHashMap.newKeySet();
         NetworkInterface card = network();
-        try (MulticastSocket socket = new MulticastSocket(null)) {
+        try (MulticastSocket socket = new MulticastSocket(null);
+             Scanner scanner = new Scanner(System.in)) {
             socket.setReuseAddress(true);
             socket.bind(new InetSocketAddress(PORT));
             socket.setNetworkInterface(card);
             socket.joinGroup(new InetSocketAddress(ALL, PORT), card);
-            Set<String> addresses = new HashSet<>();
-            for (String group : joined) {
-                String address = groupAddress(group);
-                if (addresses.add(address)) {
-                    socket.joinGroup(new InetSocketAddress(address, PORT), card);
+            for (String group : groups) changeGroup(socket, card, joined, group, true);
+            System.out.println("Dang nghe tren " + card.getName() + ", nhom: " + joined);
+            Thread receiver = new Thread(() -> {
+                try {
+                    receive(socket, joined);
+                } catch (Exception e) {
+                    if (!socket.isClosed()) {
+                        System.err.println("Loi nhan tin: " + e.getMessage());
+                    }
+                }
+            });
+            receiver.setDaemon(true);
+            receiver.start();
+            System.out.println("Nhap: net send {IP | group | *} message");
+            System.out.println("Nhom: net listen group1, group2,... | net outgroup group1, group2,...");
+            System.out.println("Vi du: net send lop1 Xin chao. Go exit de thoat.");
+            while (true) {
+                System.out.print("> ");
+                if (!scanner.hasNextLine()) break;
+                String line = scanner.nextLine().trim();
+                if (line.equalsIgnoreCase("exit")) break;
+                if (line.isEmpty()) continue;
+                try {
+                    command(line, socket, card, joined);
+                } catch (Exception e) {
+                    // Sai lenh hoac gui loi thi bao loi va van cho nhap tiep.
+                    System.err.println("Loi: " + e.getMessage());
                 }
             }
-            System.out.println("Dang nhan tren " + card.getName() + ", UDP " + PORT);
-            System.out.println("Nhom: " + joined + ". Nhan ca tin gui den IP va *. Ctrl+C de dung.");
-            byte[] buffer = new byte[65507];
-            while (true) {
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                socket.receive(packet);
-                String text = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
-                int separator = text.indexOf('\n');
-                if (separator < 0) continue;
-                String label = text.substring(0, separator);
-                // Loc ten nhom vi hai ten nhom co the trung dia chi bam.
-                if (label.equals("IP") || label.equals("*") || joined.contains(label)) {
-                    System.out.println("[Tu " + packet.getAddress().getHostAddress() + " | " + label + "] "
-                            + text.substring(separator + 1));
+            // Dong socket de danh thuc luong dang cho receive().
+            socket.close();
+            receiver.join();
+        }
+        System.out.println("Da thoat.");
+    }
+
+    // Tach xu ly lenh khoi vong Scanner de de doc.
+    static void command(String line, MulticastSocket socket, NetworkInterface card,
+                        Set<String> joined) throws Exception {
+        String[] parts = line.split("\\s+", 4);
+        if (parts.length < 3 || !parts[0].equalsIgnoreCase("net")) {
+            throw new Exception("Dung: net listen nhom | net outgroup nhom | net send dich message");
+        }
+        switch (parts[1].toLowerCase(Locale.ROOT)) {
+            case "send":
+                if (parts.length != 4) throw new Exception("Thieu noi dung tin nhan.");
+                send(parts[2], parts[3]);
+                break;
+            case "listen":
+            case "outgroup":
+                String[] groups = line.split("\\s+");
+                for (int i = 2; i < groups.length; i++) checkGroup(groups[i]);
+                for (int i = 2; i < groups.length; i++) {
+                    changeGroup(socket, card, joined, groups[i], parts[1].equalsIgnoreCase("listen"));
                 }
+                System.out.println("Nhom dang nghe: " + joined);
+                break;
+            default:
+                throw new Exception("Chi dung listen, outgroup hoac send. Go exit de thoat.");
+        }
+    }
+
+    // Tham gia/roi nhom. Hai ten nhom trung dia chi van duoc xu ly dung.
+    static void changeGroup(MulticastSocket socket, NetworkInterface card,
+                            Set<String> joined, String group, boolean join) throws Exception {
+        checkGroup(group);
+        if (joined.contains(group) == join) return; // Khong tham gia/roi lai cung nhom.
+        String address = groupAddress(group);
+        boolean shared = false;
+        for (String other : joined) {
+            if (!other.equals(group) && groupAddress(other).equals(address)) shared = true;
+        }
+        if (!shared) {
+            InetSocketAddress destination = new InetSocketAddress(address, PORT);
+            if (join) socket.joinGroup(destination, card);
+            else socket.leaveGroup(destination, card);
+        }
+        if (join) joined.add(group);
+        else joined.remove(group);
+    }
+
+    static void receive(MulticastSocket socket, Set<String> joined) throws Exception {
+        byte[] buffer = new byte[65507];
+        while (!socket.isClosed()) {
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+            socket.receive(packet);
+            String text = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
+            int separator = text.indexOf('\n');
+            if (separator < 0) continue;
+            String label = text.substring(0, separator);
+            // Loc ten nhom vi hai ten nhom co the trung dia chi bam.
+            if (label.equals("IP") || label.equals("*") || joined.contains(label)) {
+                System.out.println("[Tu " + packet.getAddress().getHostAddress() + " | " + label + "] "
+                        + text.substring(separator + 1));
             }
         }
     }
